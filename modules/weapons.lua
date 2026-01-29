@@ -1,15 +1,14 @@
-local Config = require 'data.weapons'
-local Utils = require 'modules.utils'
+local WeaponConfig = require 'data.weapons'
+local Config       = require 'config'
+local Utils        = require 'modules.utils'
 
 local Players = {}
+local playerState = LocalPlayer.state
 
 SetFlashLightKeepOnWhileMoving(true)
 
----Removes the current player from the table and deletes the entities
----@param serverId number
 local function removePlayer(serverId)
     local Player = Players[serverId]
-
     if Player and table.type(Player) ~= 'empty' then
         Utils.removeEntities(Player)
         Players[serverId] = nil
@@ -20,42 +19,33 @@ RegisterNetEvent('onPlayerDropped', function(serverId)
     removePlayer(serverId)
 end)
 
----Formats the players inventory to only have items that are in the config
----@param inventory table
----@param currentWeapon table | nil
----@return table
 local function formatPlayerInventory(inventory, currentWeapon)
     local items = {}
     local amount = 0
 
-    -- for _, itemData in pairs(inventory) do
-    --     local name = itemData and itemData.name:lower()
-    -- 
-    --     if currentWeapon and itemData and currentWeapon.name == itemData.name and lib.table.matches(itemData.metadata.components, currentWeapon.metadata.components) then
-    --         currentWeapon = nil
-    --     elseif name and Config[name] then
-    --         amount += 1
-    --         items[amount] = Utils.formatData(itemData, Config[name])
-    --     end
-    -- end
-
-    -- ONLY USE 1-6 SLOT
     for _, itemData in pairs(inventory) do
         local name = itemData and itemData.name and itemData.name:lower()
-        local slot = itemData and tonumber(itemData.slot)  -- ox_inventory item slot
-    
-        -- skip anything outside 1..6
-        local slotAllowed = slot and slot >= 1 and slot <= 6
-    
+        local slot = itemData and tonumber(itemData.slot)
+
+        local slotAllowed = false
+        if Config.HotbarSlots then
+            for i = 1, #Config.HotbarSlots do
+                if slot == Config.HotbarSlots[i] then
+                    slotAllowed = true
+                    break
+                end
+            end
+        end
+
         if currentWeapon and itemData
             and currentWeapon.name == itemData.name
             and lib.table.matches(itemData.metadata.components, currentWeapon.metadata.components)
         then
-            -- Exclude the actively held weapon from back/prop render
             currentWeapon = nil
-        elseif name and Config[name] and slotAllowed then
+
+        elseif name and WeaponConfig[name] and slotAllowed then
             amount += 1
-            items[amount] = Utils.formatData(itemData, Config[name])
+            items[amount] = Utils.formatData(itemData, WeaponConfig[name])
         end
     end
 
@@ -70,38 +60,34 @@ local function formatPlayerInventory(inventory, currentWeapon)
     return items
 end
 
----Creates all the objects for the player
----@param pedHandle number
----@param addItems table
----@param currentTable table
----@param amount number
-local function createAllObjects(pedHandle, addItems, currentTable, amount)
+local function createAllObjects(pedHandle, addItems, currentTable)
+    if not pedHandle or pedHandle == 0 or not DoesEntityExist(pedHandle) then
+        return
+    end
+
     for i = 1, #addItems do
         local item = addItems[i]
         local name = item.name:lower()
 
-        if Config[name] then
+        if WeaponConfig[name] then
             local object = Utils.getEntity(item)
 
-            if object > 0 then
+            if object and object > 0 and DoesEntityExist(object) then
                 Utils.AttachEntityToPlayer(item, object, pedHandle)
 
-                SetEntityCompletelyDisableCollision(object, false, true)
-
-                amount += 1
-                currentTable[amount] = {
-                    name = item.name,
+                currentTable[#currentTable + 1] = {
+                    name   = item.name,
                     entity = object,
                 }
+            else
+                print(('[WeaponsCarry] Failed to create entity for %s'):format(item.name or 'unknown'))
             end
         end
     end
 end
 
 AddStateBagChangeHandler('weapons_carry', nil, function(bagName, keyName, value, _, replicated)
-    if replicated then
-        return
-    end
+    if replicated then return end
 
     local serverId, pedHandle = Utils.getEntityFromStateBag(bagName, keyName)
 
@@ -109,29 +95,25 @@ AddStateBagChangeHandler('weapons_carry', nil, function(bagName, keyName, value,
         return removePlayer(serverId)
     end
 
-    if pedHandle > 0 then
-        local currentTable = Players[serverId] or {}
-        local amount = #currentTable
+    if not pedHandle or pedHandle == 0 or not DoesEntityExist(pedHandle) then
+        return
+    end
 
-        if amount > 0 then
-            Utils.removeEntities(currentTable)
-            table.wipe(currentTable)
-            amount = 0
-        end
+    Players[serverId] = Players[serverId] or {}
+    local currentTable = Players[serverId]
 
-        if value and table.type(value) ~= 'empty' then
-            createAllObjects(pedHandle, value, currentTable, amount)
-        end
+    if table.type(currentTable) ~= 'empty' then
+        Utils.removeEntities(currentTable)
+        table.wipe(currentTable)
+    end
 
-        Players[serverId] = currentTable
+    Wait(50)
+
+    if value and table.type(value) ~= 'empty' then
+        createAllObjects(pedHandle, value, currentTable)
     end
 end)
 
-local playerState = LocalPlayer.state
-
----Updates the weapons_carry state for the player
----@param inventory table
----@param currentWeapon table
 local function updateState(inventory, currentWeapon)
     while playerState.weapons_carry == nil do
         Wait(0)
@@ -145,58 +127,61 @@ local function updateState(inventory, currentWeapon)
 end
 
 AddEventHandler('onResourceStop', function(resource)
-    if resource == cache.resource then
-        for _, v in pairs(Players) do
-            if v then
-                Utils.removeEntities(v)
-            end
+    if resource ~= cache.resource then return end
+
+    for _, v in pairs(Players) do
+        if v then
+            Utils.removeEntities(v)
         end
     end
 end)
 
---- Refreshes the props for the player to make sure no clipping issues when going in/out of instances
----@param items table
----@param weapon table | nil
 local function refreshProps(items, weapon)
     if Players[cache.serverId] then
         Utils.removeEntities(Players[cache.serverId])
-
         table.wipe(Players[cache.serverId])
 
-        local Items = formatPlayerInventory(items, weapon)
+        local formatted = formatPlayerInventory(items, weapon)
 
-        createAllObjects(cache.ped, Items, Players[cache.serverId], 0)
+        if cache.ped and cache.ped > 0 and DoesEntityExist(cache.ped) then
+            Wait(50)
+            createAllObjects(cache.ped, formatted, Players[cache.serverId])
+        end
     end
 end
 
---- Loops the current flashlight to keep it enabled while the player is not aiming
----@param serial string
 local function flashLightLoop(serial)
-    serial = serial or 'scratched' -- Adds support for Scratched serial numbers if they removed it
+    serial = serial or 'scratched'
 
-    local flashState = playerState.flashState?[serial]
+    local savedState = playerState.flashState and playerState.flashState[serial]
 
-    if flashState then
+    if savedState then
         SetFlashLightEnabled(cache.ped, true)
     end
 
     while cache.weapon do
-        local currentState = IsFlashLightOn(cache.ped)
-        if currentState ~= flashState then
-            flashState = currentState
-        end
-
         Wait(100)
     end
 
-    playerState.flashState = flashState and {
-        [serial] = flashState
-    }
+    if Config.FlashlightOffOnHolster then
+        SetFlashLightEnabled(cache.ped, false)
+
+        local flashState = playerState.flashState or {}
+        flashState[serial] = false
+        playerState:set('flashState', flashState, true)
+    else
+        local flashState = playerState.flashState or {}
+        flashState[serial] = savedState or false
+        playerState:set('flashState', flashState, true)
+
+        if savedState then
+            SetFlashLightEnabled(cache.ped, true)
+        end
+    end
 end
 
-
 return {
-    updateWeapons = updateState,
+    updateWeapons  = updateState,
     loopFlashlight = flashLightLoop,
-    refreshProps = refreshProps,
+    refreshProps   = refreshProps,
 }
