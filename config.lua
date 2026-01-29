@@ -63,4 +63,9 @@ Config.PlayerSlots = {
     },
 }
 
+Config.SkipRemoveEntitiesForClass = {
+    [8]  = true, -- Motorcycle
+    [13] = true, -- Bicycle
+}
+
 return Config
