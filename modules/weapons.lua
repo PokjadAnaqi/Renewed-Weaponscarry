@@ -4,6 +4,7 @@ local Utils        = require 'modules.utils'
 
 local Players = {}
 local playerState = LocalPlayer.state
+local flashlightActive = {} -- Prevent duplicate flashlight loops per weapons
 
 SetFlashLightKeepOnWhileMoving(true)
 
@@ -74,7 +75,6 @@ local function createAllObjects(pedHandle, addItems, currentTable)
 
             if object and object > 0 and DoesEntityExist(object) then
                 Utils.AttachEntityToPlayer(item, object, pedHandle)
-
                 currentTable[#currentTable + 1] = {
                     name   = item.name,
                     entity = object,
@@ -150,34 +150,34 @@ local function refreshProps(items, weapon)
     end
 end
 
+--- Loops the current flashlight to keep it enabled while the player is not aiming
+---@param serial string
 local function flashLightLoop(serial)
     serial = serial or 'scratched'
 
-    local savedState = playerState.flashState and playerState.flashState[serial]
+    local flashState = playerState.flashState and playerState.flashState[serial]
 
-    if savedState then
-        SetFlashLightEnabled(cache.ped, true)
+    -- Restore flashlight bila equip (kalau sebelum ni ON)
+    if flashState then
+        CreateThread(function()
+            Wait(150)
+            SetFlashLightEnabled(cache.ped, true)
+        end)
     end
 
+    -- Observe state semasa weapon dipegang
     while cache.weapon do
+        local currentState = IsFlashLightOn(cache.ped)
+        if currentState ~= flashState then
+            flashState = currentState
+        end
         Wait(100)
     end
 
-    if Config.FlashlightOffOnHolster then
-        SetFlashLightEnabled(cache.ped, false)
-
-        local flashState = playerState.flashState or {}
-        flashState[serial] = false
-        playerState:set('flashState', flashState, true)
-    else
-        local flashState = playerState.flashState or {}
-        flashState[serial] = savedState or false
-        playerState:set('flashState', flashState, true)
-
-        if savedState then
-            SetFlashLightEnabled(cache.ped, true)
-        end
-    end
+    -- Simpan state terakhir sahaja (GTA akan auto-OFF bila holster)
+    playerState.flashState = flashState and {
+        [serial] = flashState
+    }
 end
 
 return {
