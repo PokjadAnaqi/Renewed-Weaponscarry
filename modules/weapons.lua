@@ -1,10 +1,8 @@
 local WeaponConfig = require 'data.weapons'
 local Config       = require 'config'
 local Utils        = require 'modules.utils'
-
 local Players = {}
 local playerState = LocalPlayer.state
-local flashlightActive = {} -- Prevent duplicate flashlight loops per weapons
 
 SetFlashLightKeepOnWhileMoving(true)
 
