@@ -1,6 +1,13 @@
 local Utils = require 'modules.utils'
 local Vehicles = {}
 
+local function shouldSkipRemove(vehicle)
+    if not DoesEntityExist(vehicle) then return false end
+    local class = GetVehicleClass(vehicle)
+    return Config.SkipRemoveEntitiesForClass
+        and Config.SkipRemoveEntitiesForClass[class] == true
+end
+
 CreateThread(function()
     while true do
         for bagname, baggedVehicles in pairs(Vehicles) do
@@ -8,7 +15,10 @@ CreateThread(function()
                 for vehicle, props in pairs(baggedVehicles) do
                     if not DoesEntityExist(vehicle) then
                         if props and table.type(props) ~= 'empty' then
-                            Utils.removeEntities(props)
+                            -- skip remove for bike / motorcycle
+                            if not shouldSkipRemove(vehicle) then
+                                Utils.removeEntities(props)
+                            end
                         end
                         Vehicles[bagname][vehicle] = nil
                     end
@@ -42,7 +52,6 @@ local function createAllObjects(vehicle, addItems, currentTable)
         local object = Utils.getEntity(item)
 
         if object and object > 0 and DoesEntityExist(object) then
-            -- make sure entity is active and safe
             FreezeEntityPosition(object, false)
             SetEntityDynamic(object, true)
             SetEntityCollision(object, false, false)
@@ -67,21 +76,22 @@ local function addVehicleStateBag(name)
 
         local vehicle = Utils.getEntityFromStateBag(bagName, keyName)
         if not vehicle or vehicle == 0 or not DoesEntityExist(vehicle) then
-            return -- silently ignore invalid vehicle instead of crashing
+            return
         end
 
         Vehicles[keyName] = Vehicles[keyName] or {}
         local currentTable = Vehicles[keyName][vehicle] or {}
 
-        -- remove old props
+        -- remove old props (unless bike)
         if table.type(currentTable) ~= 'empty' then
-            Utils.removeEntities(currentTable)
+            if not shouldSkipRemove(vehicle) then
+                Utils.removeEntities(currentTable)
+            end
             table.wipe(currentTable)
         end
 
         -- create new props
         if value and table.type(value) ~= 'empty' then
-            -- small delay to ensure vehicle fully streamed
             Wait(50)
             createAllObjects(vehicle, value, currentTable)
         end
@@ -95,9 +105,11 @@ AddEventHandler('onResourceStop', function(resource)
 
     for _, baggedVehicles in pairs(Vehicles) do
         if baggedVehicles and table.type(baggedVehicles) ~= 'empty' then
-            for _, props in pairs(baggedVehicles) do
+            for vehicle, props in pairs(baggedVehicles) do
                 if props and table.type(props) ~= 'empty' then
-                    Utils.removeEntities(props)
+                    if not shouldSkipRemove(vehicle) then
+                        Utils.removeEntities(props)
+                    end
                 end
             end
         end
