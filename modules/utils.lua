@@ -1,67 +1,47 @@
--- utils.lua
+local Config = require 'config'
 local ox_items = exports.ox_inventory and exports.ox_inventory:Items() or {}
 local Utils = {}
+local playerSlots = Config.PlayerSlots
 
-local playerSlots = {
-    -- 1
-    {
-        { bone = 24817, pos = vec3(0.04, -0.15, 0.12), rot = vec3(0.0, 0.0, 0.0) },
-        { bone = 24817, pos = vec3(0.04, -0.17, 0.02), rot = vec3(0.0, 0.0, 0.0) },
-        { bone = 24817, pos = vec3(0.04, -0.19, -0.08), rot = vec3(0.0, 0.0, 0.0) },
-    },
-
-    -- 2
-    {
-        { bone = 24818, pos = vec3(0.30, -0.16, 0.10), rot = vec3(0.0, 115.0, 180.0) },
-        { bone = 24818, pos = vec3(0.30, -0.16, -0.12), rot = vec3(0.0, 295.0, 0.0) },
-    },
-
-    -- 3
-    {
-        { bone = 24818, pos = vec3(-0.28, -0.14, 0.15), rot = vec3(0.0, 92.0, -13.0) },
-        { bone = 24818, pos = vec3(-0.28, -0.14, 0.12), rot = vec3(0.0, 92.0, 13.0) },
-    },
-
-    -- 4 (duplicate fixed with variation)
-    {
-        { bone = 24818, pos = vec3(0.30, -0.16, 0.10), rot = vec3(0.0, 100.0, 100.0) },
-        { bone = 24818, pos = vec3(0.32, -0.14, 0.12), rot = vec3(0.0, 100.0, 120.0) },
-    },
-
-    -- 5
-    {
-        { bone = 24818, pos = vec3(-0.30, -0.16, 0.10), rot = vec3(0.0, 115.0, 0.0) },
-        { bone = 24818, pos = vec3(-0.30, -0.16, -0.12), rot = vec3(0.0, 295.0, 180.0) },
-    },
-
-    -- 6
-    {
-        { bone = 24818, pos = vec3(-0.80, -0.16, 0.10), rot = vec3(0.0, 90.0, 0.0) },
-        { bone = 24818, pos = vec3(-0.65, -0.16, -0.12), rot = vec3(0.0, 295.0, 180.0) },
-    },
-}
-
--- initialize isBusy
 for i = 1, #playerSlots do
-    for v = 1, #playerSlots[i] do
-        playerSlots[i][v].isBusy = false
+    for j = 1, #playerSlots[i] do
+        playerSlots[i][j].isBusy = false
     end
 end
 
 function Utils.resetSlots()
     for i = 1, #playerSlots do
-        for v = 1, #playerSlots[i] do
-            playerSlots[i][v].isBusy = false
+        for j = 1, #playerSlots[i] do
+            playerSlots[i][j].isBusy = false
         end
     end
 end
 
+local function prepareEntity(entity)
+    if not entity or entity == 0 or not DoesEntityExist(entity) then
+        return false
+    end
+
+    SetEntityAsMissionEntity(entity, true, true)
+    FreezeEntityPosition(entity, false)
+    SetEntityDynamic(entity, true)
+    SetEntityCollision(entity, false, false)
+    SetEntityAlpha(entity, 255, false)
+    SetEntityVisible(entity, true, false)
+    ActivatePhysics(entity)
+
+    return true
+end
+
 function Utils.removeEntities(data)
     if not data then return end
+
     for i = 1, #data do
         local entry = data[i]
         local entity = entry and entry.entity
+
         if entity and DoesEntityExist(entity) then
+            SetEntityAsMissionEntity(entity, true, true)
             DeleteEntity(entity)
         end
     end
@@ -69,14 +49,12 @@ end
 
 function Utils.hasFlashLight(components)
     if not components or next(components) == nil then return false end
-
     for i = 1, #components do
         local component = components[i]
         if type(component) == 'string' and component:find('flashlight') then
             return true
         end
     end
-
     return false
 end
 
@@ -94,22 +72,19 @@ function Utils.hasVarMod(hash, components)
     for i = 1, #components do
         local compId = components[i]
         local component = ox_items and ox_items[compId]
-        if not component then goto continue_hasvar end
+        if not component then goto continue end
 
-        local ctype = component.type
-        if ctype == 'skin' or ctype == 'upgrade' then
+        if component.type == 'skin' or component.type == 'upgrade' then
             local weaponComp = component.client and component.client.component
-            if not weaponComp or #weaponComp == 0 then goto continue_hasvar end
-
-            for j = 1, #weaponComp do
-                local weaponComponent = weaponComp[j]
-                if DoesWeaponTakeWeaponComponent(hash, weaponComponent) then
-                    return GetWeaponComponentTypeModel(weaponComponent)
+            if weaponComp then
+                for j = 1, #weaponComp do
+                    if DoesWeaponTakeWeaponComponent(hash, weaponComp[j]) then
+                        return GetWeaponComponentTypeModel(weaponComp[j])
+                    end
                 end
             end
         end
-
-        ::continue_hasvar::
+        ::continue::
     end
     return nil
 end
@@ -124,59 +99,45 @@ function Utils.getWeaponComponents(name, hash, components)
         for i = 1, #components do
             local compId = components[i]
             local compDef = ox_items and ox_items[compId]
-            if not compDef then goto continue_getwc end
+            if not compDef then goto skip end
 
-            local compClientComponents = compDef.client and compDef.client.component
-            if not compClientComponents then goto continue_getwc end
+            local compClient = compDef.client and compDef.client.component
+            if not compClient then goto skip end
 
-            for j = 1, #compClientComponents do
-                local weaponComponent = compClientComponents[j]
-                if DoesWeaponTakeWeaponComponent(hash, weaponComponent) and varMod ~= weaponComponent then
-                    amount = amount + 1
-                    weaponComponents[amount] = weaponComponent
-
-                    if compDef.type == 'magazine' then
-                        hadClip = true
-                    end
-
-                    break -- found component for this compDef
+            for j = 1, #compClient do
+                if DoesWeaponTakeWeaponComponent(hash, compClient[j]) and varMod ~= compClient[j] then
+                    amount += 1
+                    weaponComponents[amount] = compClient[j]
+                    if compDef.type == 'magazine' then hadClip = true end
+                    break
                 end
             end
-
-            ::continue_getwc::
+            ::skip::
         end
     end
 
     if not hadClip then
-        amount = amount + 1
+        amount += 1
         local suffix = name and name:sub(8) or ''
         weaponComponents[amount] = joaat(('COMPONENT_%s_CLIP_01'):format(suffix))
     end
 
-    -- ensure table always returned
     return varMod, weaponComponents, hadClip
 end
 
 function Utils.findOpenSlot(tier)
-    local slotTier = playerSlots[tier]
+    local tierSlots = playerSlots[tier]
+    if not tierSlots then return nil end
 
-    if slotTier then
-        local slotAmount = #slotTier
-
-        for i = 1, slotAmount do
-            local slot = slotTier[i]
-            if not slot.isBusy then
-                slot.isBusy = true
-                return slot
-            end
+    for i = 1, #tierSlots do
+        if not tierSlots[i].isBusy then
+            tierSlots[i].isBusy = true
+            return tierSlots[i]
         end
-
-        -- fallback: ensure last slot marked busy before returning
-        slotTier[slotAmount].isBusy = true
-        return slotTier[slotAmount]
     end
 
-    return nil
+    tierSlots[#tierSlots].isBusy = true
+    return tierSlots[#tierSlots]
 end
 
 function Utils.formatData(itemData, itemConfig, ignoreSlot)
@@ -215,7 +176,7 @@ function Utils.getEntityFromStateBag(bagName, keyName)
             if NetworkDoesEntityExistWithNetworkId(netId) then
                 return NetworkGetEntityFromNetworkId(netId)
             end
-        end, ('%s received invalid entity! (%s)'):format(keyName, bagName), 10000)
+        end, ('%s invalid entity (%s)'):format(keyName, bagName), 10000)
 
         return entity
     elseif tostring(bagName):find('player:') then
@@ -223,33 +184,44 @@ function Utils.getEntityFromStateBag(bagName, keyName)
         if not serverId then return nil end
 
         local playerId = GetPlayerFromServerId(serverId)
-        local entity = lib.waitFor(function()
-            local ped = GetPlayerPed(playerId)
-            if ped and ped > 0 then return ped end
-        end, ('%s received invalid entity! (%s)'):format(keyName, bagName), 10000)
+        local ped = lib.waitFor(function()
+            local p = GetPlayerPed(playerId)
+            if p and p > 0 then return p end
+        end, ('%s invalid ped (%s)'):format(keyName, bagName), 10000)
 
-        return serverId, entity
+        return serverId, ped
     end
-
-    return nil
 end
 
 function Utils.AttachEntityToPlayer(item, entity, pedHandle)
     if not item or not entity or not pedHandle then return end
-    local pos, rot = item.pos, item.rot
+    if not DoesEntityExist(entity) or not DoesEntityExist(pedHandle) then return end
+    if not prepareEntity(entity) then return end
 
-    if pos and rot and item.bone then
-        AttachEntityToEntity(entity, pedHandle, GetPedBoneIndex(pedHandle, item.bone),
-            pos.x, pos.y, pos.z, rot.x, rot.y, rot.z, true, true, false, false, 2, true)
-    end
+    local pos, rot = item.pos, item.rot
+    if not pos or not rot or not item.bone then return end
+
+    AttachEntityToEntity(
+        entity,
+        pedHandle,
+        GetPedBoneIndex(pedHandle, item.bone),
+        pos.x, pos.y, pos.z,
+        rot.x, rot.y, rot.z,
+        true, true, false, false, 2, true
+    )
 end
 
 local function createObject(item)
     if not item or not item.model then return 0 end
-    lib.requestModel(item.model, 1000)
-    local Object = CreateObject(item.model, 0.0, 0.0, 0.0, false, false, false)
+    lib.requestModel(item.model, 2000)
+
+    local obj = CreateObject(item.model, 0.0, 0.0, 0.0, false, false, false)
+    if not prepareEntity(obj) then
+        return 0
+    end
+
     SetModelAsNoLongerNeeded(item.model)
-    return Object
+    return obj
 end
 
 local function createWeapon(item)
@@ -269,23 +241,26 @@ local function createWeapon(item)
         lib.requestModel(hasLuxeMod, 500)
     end
 
-    local showDefault = true
-    if hasLuxeMod and hadClip then
-        showDefault = false
+    local showDefault = not (hasLuxeMod and hadClip)
+
+    local weaponObject = CreateWeaponObject(
+        hash, 0,
+        0.0, 0.0, 0.0,
+        showDefault, 1.0,
+        hasLuxeMod or 0,
+        false, true
+    )
+
+    if not prepareEntity(weaponObject) then
+        RemoveWeaponAsset(hash)
+        return 0
     end
 
-    -- create weapon object
-    local weaponObject = CreateWeaponObject(hash, 0, 0.0, 0.0, 0.0, showDefault, 1.0, hasLuxeMod or 0, false, true)
-
-    -- give components (defensive: ensure components table)
-    if components and #components > 0 then
+    if components then
         for i = 1, #components do
-            local comp = components[i]
-            if comp then
-                pcall(function()
-                    GiveWeaponComponentToWeaponObject(weaponObject, comp)
-                end)
-            end
+            pcall(function()
+                GiveWeaponComponentToWeaponObject(weaponObject, components[i])
+            end)
         end
     end
 
@@ -299,7 +274,7 @@ local function createWeapon(item)
         pcall(function()
             SetCreateWeaponObjectLightSource(weaponObject, true)
         end)
-        Wait(0) -- skip a frame so the light source is created before attaching
+        Wait(0)
     end
 
     if hasLuxeMod then
@@ -308,16 +283,22 @@ local function createWeapon(item)
 
     RemoveWeaponAsset(hash)
 
-    return weaponObject or 0
+    return weaponObject
 end
 
 function Utils.getEntity(payload)
     if not payload then return 0 end
 
+    local entity = 0
+
     if payload.model then
-        return createObject(payload)
+        entity = createObject(payload)
     elseif payload.hash then
-        return createWeapon(payload)
+        entity = createWeapon(payload)
+    end
+
+    if entity and entity ~= 0 and DoesEntityExist(entity) then
+        return entity
     end
 
     return 0
