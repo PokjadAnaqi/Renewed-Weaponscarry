@@ -1,19 +1,22 @@
-local weaponModule = require 'modules.weapons'
-local carryModule = require 'modules.carry'
+local weaponModule  = require 'modules.weapons'
+local carryModule   = require 'modules.carry'
 local weaponsConfig = require 'data.weapons'
-local hotbarSlots = {1,2,3,4,5,6} -- change this list to match your hotbar (e.g. {1,2,3,4,5,6} or {10,11,12})
+local Utils         = require 'modules.utils'
+local Config        = require 'config'
+
 local hotbarSet = {}
-for _, s in ipairs(hotbarSlots) do hotbarSet[tostring(s)] = true end
--- =========================================
+for _, s in ipairs(Config.HotbarSlots) do
+    hotbarSet[tostring(s)] = true
+end
 
 local Inventory = {}
+local hotbarInventoryCache = {}
 local playerState = LocalPlayer.state
 local currentWeapon = {}
 
-local hasFlashLight = require 'modules.utils'.hasFlashLight
+local hasFlashLight = Utils.hasFlashLight
 
 local function isHotbarSlot(slot)
-    -- slot might be numeric or string key depending on your ox_inventory structure
     return hotbarSet[tostring(slot)] == true
 end
 
@@ -28,8 +31,17 @@ local function filterHotbarInventory(inv)
     return out
 end
 
--- initialize Inventory as hotbar-only snapshot
+local function rebuildHotbarCache()
+    hotbarInventoryCache = filterHotbarInventory(Inventory)
+    return hotbarInventoryCache
+end
+
+local function getHotbarInventory()
+    return hotbarInventoryCache
+end
+
 Inventory = filterHotbarInventory(exports.ox_inventory and exports.ox_inventory:GetPlayerItems() or {})
+rebuildHotbarCache()
 
 AddEventHandler('ox_inventory:currentWeapon', function(weapon)
     if weapon and weapon.name then
@@ -43,8 +55,7 @@ AddEventHandler('ox_inventory:currentWeapon', function(weapon)
                 end)
             end
 
-            -- pass hotbar-only inventory
-            return weaponModule.updateWeapons(filterHotbarInventory(Inventory), currentWeapon)
+            return weaponModule.updateWeapons(getHotbarInventory(), currentWeapon)
         end
     else
         local weaponName = currentWeapon?.name and currentWeapon.name:lower()
@@ -52,104 +63,101 @@ AddEventHandler('ox_inventory:currentWeapon', function(weapon)
         currentWeapon = {}
 
         if weaponName and weaponsConfig[weaponName] then
-            return weaponModule.updateWeapons(filterHotbarInventory(Inventory), {})
+            return weaponModule.updateWeapons(getHotbarInventory(), {})
         end
     end
 end)
 
---- Updates the inventory with the changes (hotbar-only)
 AddEventHandler('ox_inventory:updateInventory', function(changes)
-    if not changes then
-        return
-    end
+    if not changes then return end
 
-    -- Apply only hotbar slot changes
+    local changed = false
+
     for slot, item in pairs(changes) do
         if isHotbarSlot(slot) then
             Inventory[slot] = item
+            changed = true
         end
     end
 
-    weaponModule.updateWeapons(filterHotbarInventory(Inventory), currentWeapon)
-    carryModule.updateCarryState(filterHotbarInventory(Inventory))
+    if not changed then return end
+
+    rebuildHotbarCache()
+
+    local hotbarInv = getHotbarInventory()
+    weaponModule.updateWeapons(hotbarInv, currentWeapon)
+    carryModule.updateCarryState(hotbarInv)
 end)
 
 AddEventHandler('onResourceStart', function(resource)
-    if resource == cache.resource then
-        Wait(100)
-        -- refresh Inventory from ox_inventory but keep only hotbar
-        Inventory = filterHotbarInventory(exports.ox_inventory and exports.ox_inventory:GetPlayerItems() or {})
+    if resource ~= cache.resource then return end
+    Wait(150)
 
-        if table.type(playerState.weapons_carry or {}) ~= 'empty' then
-            playerState:set('weapons_carry', false, true)
-            weaponModule.updateWeapons(filterHotbarInventory(Inventory), currentWeapon)
-        end
+    Inventory = filterHotbarInventory(exports.ox_inventory and exports.ox_inventory:GetPlayerItems() or {})
+    rebuildHotbarCache()
 
-        if table.type(playerState.carry_items or {}) ~= 'empty' then
-            playerState:set('carry_items', false, true)
-            carryModule.updateCarryState(filterHotbarInventory(Inventory))
-        end
+    if playerState.weapons_carry and table.type(playerState.weapons_carry) ~= 'empty' then
+        playerState:set('weapons_carry', false, true)
+        weaponModule.updateWeapons(getHotbarInventory(), currentWeapon)
+    end
+
+    if playerState.carry_items and table.type(playerState.carry_items) ~= 'empty' then
+        playerState:set('carry_items', false, true)
+        carryModule.updateCarryState(getHotbarInventory())
     end
 end)
 
--- Utility: refreshWeapons (hotbar-only)
 local function refreshWeapons()
     if playerState.weapons_carry and table.type(playerState.weapons_carry) ~= 'empty' then
         Inventory = filterHotbarInventory(exports.ox_inventory:GetPlayerItems())
+        rebuildHotbarCache()
+
         playerState:set('weapons_carry', false, true)
-        weaponModule.updateWeapons(filterHotbarInventory(Inventory), currentWeapon)
+        weaponModule.updateWeapons(getHotbarInventory(), currentWeapon)
     end
 end
 exports("RefreshWeapons", refreshWeapons)
 
 AddStateBagChangeHandler('hide_props', ('player:%s'):format(cache.serverId), function(_, _, value)
     if value then
-        local items = playerState.weapons_carry
-
-        if items and table.type(items) ~= 'empty' then
+        if playerState.weapons_carry and table.type(playerState.weapons_carry) ~= 'empty' then
             playerState:set('weapons_carry', false, true)
         end
 
-        local carryItems = playerState.carry_items
-
-        if carryItems and table.type(carryItems) ~= 'empty' then
+        if playerState.carry_items and table.type(playerState.carry_items) ~= 'empty' then
             playerState:set('carry_items', false, true)
             playerState:set('carry_loop', false, true)
         end
     else
-        CreateThread(function()
-            weaponModule.updateWeapons(filterHotbarInventory(Inventory), currentWeapon)
-            carryModule.updateCarryState(filterHotbarInventory(Inventory))
-        end)
+        local hotbarInv = getHotbarInventory()
+        weaponModule.updateWeapons(hotbarInv, currentWeapon)
+        carryModule.updateCarryState(hotbarInv)
     end
 end)
 
--- To be fair I don't know if this is needed but it's here just in case
 lib.onCache('ped', function()
-   refreshWeapons()
+    refreshWeapons()
 end)
 
--- Some components like flashlights are being removed whenever a player enters a vehicle so we need to refresh the weapons_carry state when they exit
-lib.onCache('vehicle', function(value)
-    if not value then
-        local items = playerState.weapons_carry
-
-        if items and table.type(items) ~= 'empty' then
-            for i = 1, #items do
-                local item = items[i]
-
-                if item.components and table.type(item.components) ~= 'empty' then
-                    return refreshWeapons()
-                end
-            end
+lib.onCache('vehicle', function(vehicle)
+    if vehicle then
+        if playerState.weapons_carry and table.type(playerState.weapons_carry) ~= 'empty' then
+            playerState:set('weapons_carry', false, true)
         end
+        if playerState.carry_items and table.type(playerState.carry_items) ~= 'empty' then
+            playerState:set('carry_items', false, true)
+            playerState:set('carry_loop', false, true)
+        end
+    else
+        refreshWeapons()
+        carryModule.updateCarryState(getHotbarInventory())
     end
 end)
 
 AddStateBagChangeHandler('instance', ('player:%s'):format(cache.serverId), function(_, _, value)
     if value == 0 then
         if playerState.weapons_carry and table.type(playerState.weapons_carry) ~= 'empty' then
-            weaponModule.refreshProps(filterHotbarInventory(Inventory), currentWeapon)
+            weaponModule.refreshProps(getHotbarInventory(), currentWeapon)
         end
     end
 end)
