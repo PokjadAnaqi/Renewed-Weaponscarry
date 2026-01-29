@@ -4,13 +4,14 @@ lua54 'yes'
 
 game 'gta5'
 
-author 'Renewed Scripts | FjamZoo'
+author 'Renewed Scripts | PokjadRafaey'
 description 'Renewed Weaponscarry'
-version '2.5.2'
+version '2.6'
 
 shared_scripts {
     '@ox_lib/init.lua',
-    'init.lua'
+    'init.lua',
+    'config.lua'
 }
 
 files {
