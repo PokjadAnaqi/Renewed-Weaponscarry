@@ -16,7 +16,6 @@ Perfect for Roleplay servers that want realistic weapon carrying, synced attachm
 - Plug & Play for ox_inventory  
 - Hotbar fully configurable  
 - Player slot system fully modular  
-- Flashlight behavior configurable  
 - Optimized and lightweight  
 
 # ⚙️ Installation
