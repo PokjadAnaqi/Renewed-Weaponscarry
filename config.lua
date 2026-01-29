@@ -1,8 +1,6 @@
 Config = {}
 
-Config.FlashlightOffOnHolster = true
 Config.HotbarSlots = { 1, 2, 3, 4, 5, 6 }
-
 Config.PlayerSlots = {
     -- SLOT TIER 1
     {
