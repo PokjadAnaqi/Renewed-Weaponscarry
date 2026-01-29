@@ -110,7 +110,7 @@ local function carryLoop(itemConfig)
 
     while carryingItem do
         if dict and not overideanim and not IsEntityPlayingAnim(cache.ped, dict, anim, 3) then
-            TaskPlayAnim(cache.ped, dict, anim, 8.0, -8, -1, flag, 0, false, false, false)
+            TaskPlayAnim(cache.ped, dict, anim, 8.0, -8, -1, flag, 0, 0, 0, 0)
         end
 
         if amount > 0 then
@@ -135,7 +135,6 @@ local function carryLoop(itemConfig)
     end
 end
 
----@diagnostic disable-next-line: param-type-mismatch
 AddStateBagChangeHandler('carry_items', nil, function(bagName, keyName, value, _, replicated)
     if replicated then
         return
@@ -193,7 +192,7 @@ local function updateState(inventory)
 
     local carryItem, itemConfig = formatPlayerInventory(inventory)
 
-    if not playerState.hide_props and not lib.table.matches(playerState.carry_items or {}, carryItem) then
+    if not lib.table.matches(playerState.carry_items or {}, carryItem) then
         playerState:set('carry_items', carryItem, true)
 
         if itemConfig.dict or itemConfig.disableKeys then
@@ -205,7 +204,7 @@ local function updateState(inventory)
 end
 
 AddEventHandler('onResourceStop', function(resource)
-   if resource == cache.resource then
+   if resource == GetCurrentResourceName() then
         for k, _ in pairs(Players) do
             removePlayer(k)
         end
